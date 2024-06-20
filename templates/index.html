@@ -6,7 +6,21 @@
 <h1>
     Hello Gin!
 </h1>
+<!-- articles ? -->
 
+{{ range .payload }}
+<!-- create the link for the article based on its ID -->
+<a href="/article/view/{{.ID}}">
+    <!-- display the title of the article -->
+    <h2>
+        {{.Title}}
+    </h2>
+</a>
+     <!-- display the content of the article -->
+<p>
+    {{.Content}}
+</p>
+{{end}}
 <!-- embed the footer.html template at this location -->
 
 {{ template "footer.html" . }}

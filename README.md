@@ -191,3 +191,275 @@ to execute the application from the CLI, go to the app dir and run:
 ```go build -o app```
 this will build your app and create an exe app which can be ran using:
 ```./app```
+
+###### Dispalying the list of articles
+
+We'll try to add the functionality to display the list of all articles on the index page.
+
+after refactoring the code, here's the following `main.go` file:
+```
+package main
+
+import (
+	"github.com/gin-gonic/gin"
+)
+
+var router *gin.Engine
+
+func main() {
+	// set the router as the default one provided by Gin
+	router = gin.Default()
+
+	// process the templates at the start of so that they dont have to be loaded
+	// from the disk again. This makes serving HTML pages very fast.
+
+	router.LoadHTMLGlob("templates/*")
+
+	// handle Index
+	router.GET("/", showIndexPage)
+
+	// start serving the application
+	router.Run()
+}
+```
+
+###### Designing the Article model
+after getting to know the basic fiels that an article `type` needs, we create a `models.article.go` file to represent our `article`.
+
+since this demo app isnt going to talk about DBs we're not going to be accessing DBs and thus we will be having our data in memory.
+
+we'll be needing a function to return to us the data that's stored.
+
+here's the code that satisfies our needs:
+```
+package main
+
+type article struct {
+	ID      int    `json:"id"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
+}
+
+var articleList = []article{
+	article{ID: 1, Title: "article 1", Content: "article 1 body"},
+	article{ID: 2, Title: "article 2", Content: "article 2 body"},
+}
+
+// return a list of all the articles
+func getAllArticles() []article {
+	return articleList
+}
+```
+
+we will also write a test for the above function named `TestGetAllArticles()` and it'll be placed in the `models.article_test.go` file.
+
+here's the code for `models.article_test.go`:
+```
+package main
+
+import "testing"
+
+// test the fucntion that fetches all articles
+func TestGetAllArticles(t *testing.T) {
+	alist := getAllArticles()
+
+	// check taht the length of the list of articles returned is the
+	// same as the length of the global variable holding the list
+	if len(alist) != len(articleList) {
+		t.Fail()
+	}
+
+	// check that each member is identical
+	for i, v := range alist {
+		if v.Content != articleList[i].Content || v.ID != articleList[i].ID || v.Title != articleList[i].Title {
+			t.Fail()
+			break
+		}
+
+	}
+}
+```
+
+to run the test just run:
+```go test```
+
+###### Creating the view template
+
+since the list of articles will be displayed on the index patge, we dont need to create a new template. However, we need to change the `index.html` template to replace the currect content with the list of articles.
+
+to make this change, we'll assume that the list of articles will be passed to the template in a variable named `payload`. With this assumption, the following snippet should show the list of all articles:
+
+```
+{{ range .payload }}
+<!-- create the link for the article based on its ID -->
+<a href="/article/view/{{.ID}}">
+    <!-- display the title of the article -->
+    <h2>
+        {{.Title}}
+    </h2>
+</a>
+     <!-- display the content of the article -->
+<p>
+    {{.Content}}
+</p>
+{{end}}
+```
+
+the small code above will loop over all the items in the `payload` variable and will display the title and the content. It will also link to each article.
+However, since we havent made (yet) any route handlers for displaying individual articles, these links wont work.
+
+the code above will be placed in the `index.html` file.
+
+###### Specifying the requirement for the route handler with a unit test
+
+first we start with creating the test to define the expected behavior of the handler for the index route.
+the test will check for the following conditions:
+
+1. the handler responds with an HTTP status code of 200.
+2. the returned HTML contains a title tag containing the text `Home Page`.
+
+the code for the test will be placed in the `TestShowIndexPageUnauthenticated` function in the `handler.article_test.go` file. We will place helper functions used by this function in the `commom_test.go` file.
+
+the content of `handlers.article_test.go` is as follows:
+
+```
+package main
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+// test that a GET request to the home page returns the home page with
+// the HTTP code 200 for an unauthenticated user
+func TestShowIndexPageUnauthenticated(t *testing.T) {
+	r := getRouter(true)
+
+	r.GET("/", showIndexPage)
+
+	// create a request to send to the above route
+	req, _ := http.NewRequest("GET", "/", nil)
+
+	testHTTPResponse(t, r, req, func(w *httptest.ResponseRecorder) bool {
+		// test that the http status code is 200
+		statusOK := w.Code == http.StatusOK
+
+		// test that the page title is "Home Page"
+		// you can carry out a lot more detailed tests using libraries that can
+		// parse and process HTML pages
+
+		p, err := io.ReadAll(w.Body)
+		pageOK := err == nil && strings.Index(string(p), "<title>Home Page</title>") > 0
+
+		return statusOK && pageOK
+	})
+}
+```
+
+the contet of the `common_test.go` is as follows:
+```
+package main
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+)
+
+var tempArticleList []article
+
+// this function is used for setup before executing the test functions
+func TestMain(m *testing.M) {
+	// set Gin to Test mode
+	gin.SetMode(gin.TestMode)
+
+	// run the other tests
+	os.Exit(m.Run())
+}
+
+// helper function to create a router during testing
+func getRouter(withTemplates bool) *gin.Engine {
+	r := gin.Default()
+
+	if withTemplates {
+		r.LoadHTMLGlob("templates/*")
+	}
+
+	return r
+}
+
+// helper function to process a request and test its response
+func testHTTPResponse(t *testing.T, r *gin.Engine, req *http.Request, f func(w *httptest.ResponseRecorder) bool) {
+	// create a response recorder
+	w := httptest.NewRecorder()
+
+	// create the service and process the above request
+	r.ServeHTTP(w, req)
+
+	if !f(w) {
+		t.Fail()
+	}
+}
+
+// this function is used to store the main lists into the temporary one for testing
+func saveLists() {
+	tempArticleList = articleList
+}
+
+// this function is used to restore the main lists from the temporary one
+func restoreList() {
+	articleList = tempArticleList
+}
+```
+
+for the implementation of this test, we wrote some helper functions.
+
+the `TestMain` function sets Gin to use the test mode and calls the rest of the test functions. The `getRouter` function creates and returns a router in a manner similar to the main application. The `saveLists()` function saves the original article list in a temporary variable. This temporary variable is used by the `restoreLists()` function to restore the article list to its initial state after a unit test is executed.
+
+the `testHTTPResponse` function executes the function passed in to see if it returns a boolean true value -- indicating a successfull test, or not.
+This function helps us avoid duplicating the code needed to test the response of an HTTP request.
+
+to check the HTTP code and the returned HTML, we'll do the following:
+
+1. create a new router.
+2. define a route to use the same handler that the main app uses (showIndexPage).
+3. create a new request to access this route
+4. create a function that processes the response to test the HTTP code and HTML.
+5. call the `testHTTPResponse()` with this new function to complete the test.
+
+###### Creating the router handler
+
+we will create all route handlers for article related functionality in the `handler.article.go` file. The handler for the index page, `showIndexPage` performs the following tasks:
+
+1. fetches the list of articles
+this can be done using the `getAllArticles()` function defined previously:
+
+```articles := getAllArticles()```
+
+2. renders the index.html template passing it the article list
+this can be done using the code below:
+
+```
+c.HTML(
+	// set the HTTP status to 200 (OK)
+	http.StatusOK,
+	// use the index.html template
+	"index.html",
+	// pass the data that the page uses
+	gin.H{
+		"title": "Home Page",
+		"payload": articles,
+	},
+)
+```
+
+the only difference from the version in the previous section is that we're passing the list of articles which will be accessed in the template by the variable named `payload`.
+
+the `handlers.article.go` file should contain the following code:
+```
