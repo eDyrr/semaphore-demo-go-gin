@@ -463,3 +463,24 @@ the only difference from the version in the previous section is that we're passi
 
 the `handlers.article.go` file should contain the following code:
 ```
+package main
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+func showIndexPage(c *gin.Context) {
+	articles := getAllArticles()
+
+	c.HTML(
+		http.StatusOk,
+		"index.html",
+		gin.H{
+			"title": "Home Page",
+			"payload": articles,
+		},
+	)
+}
+```
