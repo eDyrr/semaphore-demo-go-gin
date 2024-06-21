@@ -484,3 +484,312 @@ func showIndexPage(c *gin.Context) {
 	)
 }
 ```
+
+###### Displaying a single article
+
+in the last section, while we displayed a list of articles, the links to the articles didnt work. In this section, we'll add handlers and templates to display an article when it is selected.
+
+###### Setting up the route
+
+we can set up a new route to handle requests for a single article in the same manner as in the previous route. However, each article has its own route, and with Gin we can pass parameters to routes, as follows:
+
+```router.GET("article/view/:article_id", geArticle)```
+
+this route will match all requests matching the above path and will store the value of the last part of the route in the route parameter named `article_id` which we can access in the route handler. For this route, we will define the handler in a function named `getArticle`.
+
+the updated `main.go` file should contain the following code:
+
+```
+func main() {
+	router := gin.Default()
+	
+	// handle Index
+	router.GET("/", showIndexPage)
+
+	// handle GET requests at /article/view/some_article_id
+	router.GET("/article/view/:article_id", getArticle)
+
+	router.Run()
+}
+```
+
+###### Creating the view templates
+
+since we're aiming to display an article, we should create an interface for it, thus a template as follows:
+```
+<!-- article.html -->
+
+<!-- embed the header.html template at this location -->
+
+{{ template "header.html" . }}
+
+<!-- display the title of the article -->
+
+<h1>
+    {{ .payload.Title }}
+</h1>
+
+<!-- display the content of the article -->
+<p>
+    {{ .payload.Content }}
+</p>
+
+<!-- embed the footer.html template at this location -->
+{{ template "footer.html" . }}
+```
+
+###### Specifying the requirement for the Go microservice router
+
+the test for the handler of this route will check fort the following conditions:
+
+- the handler responds with an HTTP status code of 200,
+- the returned HTML contains a title tag containing the title of the article that was fetched.
+
+the code for the test will be placed in the `TestArticleUnauthenticated` function in the `handlers.article_test.go` file. We will place helper functions used by this function in the `common_test.go` file.
+
+###### Creating the router handler
+
+the handler for the article page, `getArticle` performs the following tasks:
+1. extracts the ID of the article to display
+to fetch and display the right article, we first need to extract its ID from the context. This can be extracted as follows:
+
+```c.Param("article_id")```
+
+where `c` is the Gin Context which is parameter to any route handler when using Gin.
+
+2. fetches the article
+this can be done using the `getArticleByID()` function defined in the `models.article.go` file:
+
+```article, err := getArticleByID(articleID)```
+
+after adding `getArticleByID`, the `models.article.go` file should look like this:
+
+```
+package main
+
+import "errors"
+
+type article struct {
+	ID      int    `json:"id"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
+}
+
+var articleList = []article{
+	article{ID: 1, Title: "article 1", Content: "article 1 body"},
+	article{ID: 2, Title: "article 2", Content: "article 2 body"},
+}
+
+// return a list of all the articles
+func getAllArticles() []article {
+	return articleList
+}
+
+func getArticleByID(id int) (*article, error) {
+	for _, v := range articleList {
+		if v.ID == id {
+			return &v, nil
+		}
+	}
+	return nil, errors.New("Article not found")
+}
+```
+
+3. renders the `article.html` template passing it the article
+
+this can be done using the code below:
+```
+c.HTML(
+	http.StatusOK,
+	"article.html",
+	gin.H{
+		"title": article.Title,
+		"payload": article,
+	},
+)
+```
+
+the updated `handlers.article.go` file should contain the following code:
+
+```
+package main
+
+import(
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+)
+
+func showIndexPage(c *gin.Context) {
+	articles := getAllArticles()
+
+	c.HTML(
+		http.StatusOK,
+		"index.html",
+		gin.H{
+			"title": "Home Page",
+			"payload": articles,
+		},
+	)
+}
+
+func getArticle(c *gin.Context) {
+	// check if the article ID is valid
+	if articleID, err := strconv.Atoi(c.Param("article_id")); err == nil {
+		// check if the article exists
+		if article, err := getArticleByID(articleID); err == nil {
+			// call the HTML method of the context to render a template
+			c.HTML(
+				// set the HTTP status to 200 (OK)
+				http.StatusOK,
+				// use the 
+				"article.html",
+				// pass the data that the page uses
+				gin.H{
+					"title": article.Title,
+					"payload": article,
+				},
+			)
+		} else {
+			// if the article is not found, abort with an error
+			c.AbortWithError(http.StatusNotFound, err)
+		}
+	} else {
+		// if invalid article ID is specified in the URL, abort with an error
+		c.AbortWithStatus(http.StatusNotFound)
+	}
+}
+```
+now we build and run the application and visit `http://localhost:8080/article/view/1` in a browser
+
+###### Responding with JSON/XML
+we'll do some refactoring of the app so that, depending on the request headers, our application can respond in HTML, JSON or XML format.
+
+###### Creating a reusable function
+so far, we've been using the HTML method of Gin's context to render directly from route handlers. This is fine when we always want to render HTML.
+however, if we want to change the format of the response based on the request, we should refactor this part out into a single function that takes care of the rendering. By doing this, we can let the route handler focus on validation and data fetching.
+
+a route handler has to do the same kind of validation, data fetching and data processing irrespective of the desired response format. Once this part is done, this data can be used to generate a response in the desired format. If we need an HTML response, we can pass this data to the HTML template and generate the page. If we need a JSON response, we can convert this data to JSOn and send it back. Likewise for XML.
+
+we'll create a `render` function in `main.go` that will be used by all the route handlers. This function will take care of rendering in the right format based on the request's `Accept` header.
+
+in Gin, the `Context` passed to a route handler contains a field named `Request`. This field contains the `Header` field which contains all the request headers. We can use the `Get` method on `Header` to extract the `Accept` header as follows:
+```
+// c is the Gin Context
+c.Request.Header.Get("Accept")
+```
+
+- if this is set to `application/json`, the function will render JSON,
+- if this is set to `application/xml`, the function will render XML, and
+- if this is set to anything else or is empty, the function will render HTML.
+
+the `render` function is as follows, add it in the `handler.article.go` file:
+
+```
+// render one of HTML, JSON or CSV based on the 'Accept' header of the request
+// if the header doesnt specify this, HTML is rendered, provided that
+// the template name is present
+func render(c *gin.Context, data gin.H, templateName string) {
+	switch c.Request.Header.Get("Accept") {
+		case "application/json":
+			// respond with JSON
+			c.JSON(http.StatusOK, data["payload"])
+		case "application/xml":
+			// respond with XML
+			c.XML(http.StatusOK, data["payload"])
+		default:
+			// respond with HTML
+			c.HTML(http.StatusOK, templateName, data)
+	}
+}
+```
+
+###### Modifying the requirement for the route handlers with a unit test
+
+since we're now expecting JSON and XML responses if the respective headers are set, we should add tests to the `handlers.article_test.go` file to test these conditions. We will add tests to:
+
+1. test that the application returns a JSON list of articles when the `Accept` header is set to `application/json`
+
+2. test the application returns an article in XML format when the `Accept` header is set to `application/xml`
+
+these will be added as functions named `TestArticleListJSON` and `TestArticleListXML`.
+
+###### Updating the route handlers
+
+the route handlers dont really need to change much as the logic for rendering in any format is pretty much the same. All that needs to be done is use the `render` function instead of rendering using the `c.HTML` methods.
+
+for example, the `showIndexPage` route handler in `handlers.article.go` will change from:
+
+```
+func showIndexPage(c *gin.Context) {
+	articles := getAllArticles()
+
+	c.HTML(
+		http.StatusOK,
+		"index.html",
+		gin.H{
+			"title": "Home Page",
+			"payload": articles,
+		},
+	)
+}
+```
+
+to:
+
+```
+func showIndexPage(c *gin.Context) {
+	article := getAllArticles()
+
+	// call the render function with the name of the template to render
+	render(c, gin.H{
+		"title": "Home Page",
+		"payload": articles}, "index.html")
+}
+```
+
+**retrieving the list of articles in JSON format**
+
+to see our latest updates in action, build and run your application. Then execute the following command:
+
+```
+curl -X GET -H "Accept: application/json" http://localhost:8080/"
+```
+
+this should return a response as follows:
+
+```
+[{"id":1,"title":"Article 1","content":"Article 1 body"},{"id":2,"title":"Article 2","content":"Article 2 body"}]
+```
+
+as you can see, our request got a response in the JSOn format because we set the `Accept` header to `application/json`.
+
+**retrieving an article in XML format**
+
+lets now get our application to respond with the details of a particular article in the XML format. To do this, first, start your application as mentioned above. Now execute the following command:
+
+```
+curl -X GET -H "Accept: application/XML" http://localhost:8080/
+```
+
+this should return a response as follows:
+
+```
+<article><ID>1</ID><Title>Article 1</Title><Content>Article 1 body</Content></article>
+```
+
+as you can see, our request got a response in the XML format because we set the `Accept` header to `application/xml`.
+
+###### Testing the application
+
+since we've been using tests to create specifications for our route handlers and models, we should constantly be running them to ensure that the functions work as expected. Lets now run the tests that we have written and see the results. In your project directory, execute the following command:
+
+```
+go test -v
+```
+executing this commnad should look like this:
+
+```
+
+```

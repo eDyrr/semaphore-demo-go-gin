@@ -18,6 +18,8 @@ func main() {
 	// define the route for the index page and display the index.html template
 	// to start with, we'll use an inline route handler.
 	router.GET("/", showIndexPage)
+
+	router.GET("/article/view/:article_id", getArticle)
 	// start serving the application
 	router.Run()
 }
