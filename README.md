@@ -791,5 +791,14 @@ go test -v
 executing this commnad should look like this:
 
 ```
-
+=== RUN   TestShowIndexPageUnauthenticated
+[GIN] 2024/06/21 - 23:53:06 | 200 |     484.412µs |                 | GET      "/"
+--- PASS: TestShowIndexPageUnauthenticated (0.00s)
+=== RUN   TestGetAllArticles
+--- PASS: TestGetAllArticles (0.00s)
+PASS
+ok      github.com/eDyrr/semaphore-demo-go-gin  0.008s
 ```
+
+
+the tutorial I followed:https://semaphoreci.com/community/tutorials/building-go-web-applications-and-microservices-using-gin
